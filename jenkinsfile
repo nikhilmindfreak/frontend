@@ -1,0 +1,77 @@
+pipeline {
+    agent {
+        label 'AGENT-1' // our node
+    }
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()  //  to not to run the code by other person at the same time.
+        ansiColor('xterm') // terraform colours
+    }
+    environment {
+        def appVersion = '' // variable declaration for whole code/ global and we left to access
+        nexusUrl = 'nexus.devopsme.online:8081'
+    }
+    stages {
+        stage( 'read the version') {
+            steps{
+                script {  // script to read definition def command
+                    def packageJson = readJSON file: 'package.json'
+                    appVersion = packageJson.version  // we access variable value here 
+                    echo "application version: $appVersion"  // we are printing the version
+                }
+            }
+        }
+        stage('Build') {
+            steps{
+                sh """
+                zip -q -r frontend-${appVersion}.zip * -x Jenkinsfile -x frontend-${appVersion}.zip
+                ls -ltr
+                """
+            }
+        }
+        stage('Nexus Artifact Upload') {
+            steps{
+                script{
+                    nexusArtifactUploader(
+                        nexusVersion: 'nexus3',
+                        protocol: 'http',
+                        nexusUrl: "${nexusUrl}",
+                        groupId: 'com.expense',
+                        version: "${appVersion}",
+                        repository: "frontend",
+                        credentialsId: 'nexus-auth',
+                        artifacts: [
+                            [artifactId: "frontend" ,
+                            classifier: '',
+                            file: "frontend-" + "${appVersion}" + '.zip',
+                            type: 'zip']
+                        ]
+                    )
+                }
+                
+            }
+        }
+        stage('Deploy'){
+            steps{
+                script{
+                    def params = [
+                        string(name: 'appVersion', value: "${appVersion}")
+                    ]
+                    build job: 'frontend-deploy', parameters: params, wait: false
+                }
+            }
+        }
+    }
+    post { 
+        always { 
+            echo 'I will always say Hello again!'
+            deleteDir()   // to delete after build to avoid futher build anticipated errors
+        }
+        success { 
+            echo 'I will run when pipeline is success'
+        }
+        failure { 
+            echo 'I will run when pipeline is failure'
+        }
+    }
+}
